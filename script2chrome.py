@@ -3,7 +3,11 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 import json
-from typing import Generator, List, Union
+from typing import Any, Dict, Generator, List, Union
+
+
+PID = 1
+VIRT_THREAD_OFFSET = 2**32
 
 
 class EventDescrType(Enum):
@@ -66,9 +70,9 @@ class Event:
     header: EventHeader
     backtrace: List[str]
 
-    def to_chrome(self, tid: int):
+    def to_chrome(self, tid: int) -> Dict[str, Any]:
         out = {
-            "pid": 1,
+            "pid": PID,
             "tid": tid,
             "ts": self.header.ts,
             "name": str(self.header.descr),
@@ -200,14 +204,37 @@ def parse(lines: Iterable[str]) -> Generator[Event, None, None]:
         )
 
 
-VIRT_THREAD_OFFSET = 2**32
+def metadata_event(name: str, tid: int, args: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "name": name,
+        "ph": "M",
+        "pid": PID,
+        "tid": tid,
+        "ts": 0,
+        "args": args,
+    }
 
 
 def main() -> None:
+    # accumulates all events for JSON output
     events = []
+
+    # ID counter for virtual threads (one for each tokio task)
     virt_thread_counter = 0
-    phys_thread_state = {}
-    known_tasks = {}
+
+    # maps thread ID to virtual thread ID.
+    # If a thrad ID is NOT in this dict, use its real ID.
+    phys_thread_state: Dict[int, int] = {}
+
+    # maps task ID to virtual thread ID and reverse
+    known_tasks: Dict[int, int] = {}
+    known_tasks_rev: Dict[int, int] = {}
+
+    # maps threads to names
+    thread_names: Dict[int, str] = {}
+
+    # flags if we have set up process-level metadata
+    process_metadata_done = False
 
     with open("perf.txt") as f_in:
         for evt in parse(f_in):
@@ -219,6 +246,7 @@ def main() -> None:
                     virt_thread_counter += 1
 
                 phys_thread_state[evt.header.thread_id] = known_tasks[task]
+                known_tasks_rev[known_tasks[task]] = task
             elif isinstance(evt.header.descr, EventDescrTokioTaskPollEnd):
                 task = evt.header.descr.task
                 is_ready = evt.header.descr.is_ready
@@ -236,9 +264,53 @@ def main() -> None:
 
             try:
                 tid = phys_thread_state[evt.header.thread_id]
+                task = known_tasks_rev[tid]
+                thread_name = f"tokio task: {task}"
             except KeyError:
                 tid = evt.header.thread_id
+                thread_name = f"thread: {evt.header.thread_id}: {evt.header.thread_name}"
 
+            # emit "thread name" metadata events
+            if tid not in thread_names:
+                thread_names[tid] = thread_name
+
+                if not process_metadata_done:
+                    events += [
+                        metadata_event(
+                            "process_name",
+                            tid,
+                            {
+                                "name": "tokio2chrome",
+                            },
+                        ),
+                        metadata_event(
+                            "process_sort_index",
+                            tid,
+                            {
+                                "sort_index": 0,
+                            },
+                        ),
+                    ]
+                    process_metadata_done = True
+
+                events += [
+                    metadata_event(
+                        "thread_name",
+                        tid,
+                        {
+                            "name": thread_name,
+                        },
+                    ),
+                    metadata_event(
+                        "thread_sort_index",
+                        tid,
+                        {
+                            "sort_index": tid,
+                        },
+                    ),
+                ]
+
+            # emit actual event
             events.append(evt.to_chrome(tid))
 
 
