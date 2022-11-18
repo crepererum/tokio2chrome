@@ -10,7 +10,12 @@ this repo wants to help with this.
 
 
 ## Technical Background
-We have modified [tokio] to include [SystemTap SDT] probes and provide some tooling to process these.
+Ideally this would work without modifying the source code and just by using dynamic tracepoints. Seems
+[we cannot have nice things](https://lore.kernel.org/linux-perf-users/YboC1QIP342BBz5t@kernel.org/) though. I unable to
+use `perf probe` to insert tracepoints at the right places, because `perf` did neither accept the demangled Rust
+symbols nor the mangled ones.
+
+So have modified [tokio] to include [SystemTap SDT] probes and provide some tooling to process these.
 
 
 ## Usage
