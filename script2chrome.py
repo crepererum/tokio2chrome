@@ -3,11 +3,15 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 import json
-from typing import Any, Dict, Generator, List, Union
+from typing import cast, Generator, TypeAlias
 
 
 PID = 1
 VIRT_THREAD_OFFSET = 2**32
+
+
+# See https://github.com/python/typing/issues/182#issuecomment-1320974824
+JSON: TypeAlias = dict[str, "JSON"] | list["JSON"] | str | int | float | bool | None
 
 
 class EventDescrType(Enum):
@@ -47,13 +51,13 @@ class EventDescOther:
     ty: EventDescrType = EventDescrType.INSTANT
 
 
-EventDescr = Union[
-    EventDescrSysEnter,
-    EventDescrSysExit,
-    EventDescrTokioTaskPollBegin,
-    EventDescrTokioTaskPollEnd,
-    EventDescOther,
-]
+EventDescr = (
+    EventDescrSysEnter
+    | EventDescrSysExit
+    | EventDescrTokioTaskPollBegin
+    | EventDescrTokioTaskPollEnd
+    | EventDescOther
+)
 
 
 @dataclass
@@ -68,18 +72,20 @@ class EventHeader:
 @dataclass
 class Event:
     header: EventHeader
-    backtrace: List[str]
+    backtrace: list[str] | None
 
-    def to_chrome(self, tid: int) -> Dict[str, Any]:
-        out = {
+    def to_chrome(self, tid: int) -> JSON:
+        out: dict[str, JSON] = {
             "pid": PID,
             "tid": tid,
             "ts": self.header.ts,
             "name": str(self.header.descr),
             "cat": str(type(self.header.descr)),
-            "stack": self.backtrace,
             "ph": self.header.descr.ty.value,
         }
+
+        if self.backtrace is not None:
+            out["stack"] = cast(JSON, self.backtrace)
 
         if self.header.descr.ty == EventDescrType.INSTANT:
             out["s"] = "t"
@@ -199,7 +205,7 @@ def parse(lines: Iterable[str]) -> Generator[Event, None, None]:
         )
 
 
-def metadata_event(name: str, tid: int, args: Dict[str, Any]) -> Dict[str, Any]:
+def metadata_event(name: str, tid: int, args: JSON) -> JSON:
     return {
         "name": name,
         "ph": "M",
@@ -219,14 +225,14 @@ def main() -> None:
 
     # maps thread ID to virtual thread ID.
     # If a thrad ID is NOT in this dict, use its real ID.
-    phys_thread_state: Dict[int, int] = {}
+    phys_thread_state: dict[int, int] = {}
 
     # maps task ID to virtual thread ID and reverse
-    known_tasks: Dict[int, int] = {}
-    known_tasks_rev: Dict[int, int] = {}
+    known_tasks: dict[int, int] = {}
+    known_tasks_rev: dict[int, int] = {}
 
     # maps threads to names
-    thread_names: Dict[int, str] = {}
+    thread_names: dict[int, str] = {}
 
     # flags if we have set up process-level metadata
     process_metadata_done = False
