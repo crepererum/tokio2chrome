@@ -50,6 +50,19 @@ class EventDescrTokioTaskPollBegin:
 class EventDescrTokioTaskPollEnd:
     task: int
     is_ready: bool
+    panicked: bool
+    ty: EventDescrType = EventDescrType.END
+
+
+@dataclass
+class EventDescrTokioTaskStart:
+    task: int
+    ty: EventDescrType = EventDescrType.BEGIN
+
+
+@dataclass
+class EventDescrTokioTaskFinish:
+    task: int
     ty: EventDescrType = EventDescrType.END
 
 
@@ -87,6 +100,8 @@ class EventDescrOther:
 EventDescr = (
     EventDescrSysEnter
     | EventDescrSysExit
+    | EventDescrTokioTaskStart
+    | EventDescrTokioTaskFinish
     | EventDescrTokioTaskPollBegin
     | EventDescrTokioTaskPollEnd
     | EventDescrProcessName
@@ -113,7 +128,7 @@ class Event:
 
     def to_chrome(self) -> JSON:
         name = camel2snake(
-            type(self.header.descr).__name__.removeprefix("EventDescr").removesuffix("Enter").removesuffix("Exit").removesuffix("Begin").removesuffix("End")
+            type(self.header.descr).__name__.removeprefix("EventDescr").removesuffix("Enter").removesuffix("Exit").removesuffix("Begin").removesuffix("End").removesuffix("Start").removesuffix("Finish")
         )
 
         out: dict[str, JSON] = {
@@ -177,6 +192,11 @@ def parse_descr(s: str) -> EventDescr:
         return EventDescrTokioTaskPollEnd(
             task=extract_sdt_arg(s, 1),
             is_ready=bool(extract_sdt_arg(s, 2)),
+            panicked=bool(extract_sdt_arg(s, 3)),
+        )
+    elif "sdt_tokio:task_finish" in s:
+        return EventDescrTokioTaskFinish(
+            task=extract_sdt_arg(s, 1),
         )
     else:
         return EventDescrOther(
@@ -288,33 +308,40 @@ def process_events(events: Iterable[Event]) -> Generator[Event, None, None]:
     process_metadata_done = False
 
     for evt in events_it:
+        task = None
+        tid = None
+        emit_task_finish = False
+
         if isinstance(evt.header.descr, EventDescrTokioTaskPollBegin):
             task = evt.header.descr.task
 
             if evt.header.thread_id in phys_thread_state:
-                tid = phys_thread_state[evt.header.thread_id]
-                old_task = known_tasks_rev[tid]
+                old_tid = phys_thread_state[evt.header.thread_id]
+                old_task = known_tasks_rev[old_tid]
                 print(f"already have a task running on this thread: thread={evt.header.thread_id} new_task={task} old_task={old_task}")
                 yield Event(
                     header=EventHeader(
-                        thread_name=thread_names[tid],
-                        thread_id=tid,
+                        thread_name=thread_names[old_tid],
+                        thread_id=old_tid,
                         core=evt.header.core,
                         ts=evt.header.ts,
                         descr=EventDescrTokioTaskPollEnd(
                             task=old_task,
                             is_ready=False,
+                            panicked=False,
                         ),
                     ),
                     backtrace=None,
                 )
 
-            if task not in known_tasks:
-                known_tasks[task] = VIRT_THREAD_OFFSET - virt_thread_counter
+            tid = known_tasks.get(task)
+            if tid is None:
+                tid = VIRT_THREAD_OFFSET - virt_thread_counter
+                known_tasks[task] = tid
+                known_tasks_rev[tid] = task
                 virt_thread_counter += 1
 
-            phys_thread_state[evt.header.thread_id] = known_tasks[task]
-            known_tasks_rev[known_tasks[task]] = task
+            phys_thread_state[evt.header.thread_id] = tid
         elif isinstance(evt.header.descr, EventDescrTokioTaskPollEnd):
             task = evt.header.descr.task
             is_ready = evt.header.descr.is_ready
@@ -337,14 +364,34 @@ def process_events(events: Iterable[Event]) -> Generator[Event, None, None]:
                 except KeyError:
                     print(f"unknown tokio task: task={task}")
                     continue
+                emit_task_finish = True
+        elif isinstance(evt.header.descr, EventDescrTokioTaskFinish):
+            task = evt.header.descr.task
 
-        try:
-            tid = phys_thread_state[evt.header.thread_id]
-            task = known_tasks_rev[tid]
-            thread_name = f"tokio task: {task}"
-        except KeyError:
-            tid = evt.header.thread_id
+            try:
+                tid = known_tasks[task]
+            except KeyError:
+                continue
+
+            if phys_thread_state.get(evt.header.thread_id) == tid:
+                del phys_thread_state[evt.header.thread_id]
+
+            try:
+                del known_tasks[task]
+            except KeyError:
+                continue
+
+        if tid is None:
+            try:
+                tid = phys_thread_state[evt.header.thread_id]
+                task = known_tasks_rev[tid]
+            except KeyError:
+                tid = evt.header.thread_id
+
+        if task is None:
             thread_name = f"thread: {evt.header.thread_id}: {evt.header.thread_name}"
+        else:
+            thread_name = f"tokio task: {task}"
 
         # emit "thread name" metadata events
         if tid not in thread_names:
@@ -402,6 +449,20 @@ def process_events(events: Iterable[Event]) -> Generator[Event, None, None]:
                 backtrace=None,
             )
 
+            if task is not None:
+                yield Event(
+                    header=EventHeader(
+                        thread_name=thread_name,
+                        thread_id=tid,
+                        core=evt.header.core,
+                        ts=evt.header.ts,
+                        descr=EventDescrTokioTaskStart(
+                            task=task,
+                        ),
+                    ),
+                    backtrace=None,
+                )
+
         # emit actual event
         yield Event(
             header=EventHeader(
@@ -413,6 +474,21 @@ def process_events(events: Iterable[Event]) -> Generator[Event, None, None]:
             ),
             backtrace=evt.backtrace,
         )
+
+        # add task finish event
+        if task is not None and emit_task_finish:
+            yield Event(
+                header=EventHeader(
+                    thread_name=thread_name,
+                    thread_id=tid,
+                    core=evt.header.core,
+                    ts=evt.header.ts,
+                    descr=EventDescrTokioTaskFinish(
+                        task=task,
+                    ),
+                ),
+                backtrace=None,
+            )
 
     for task in sorted(known_tasks):
         print(f"task never ended: task={task}")

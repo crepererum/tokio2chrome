@@ -8,6 +8,7 @@ exec perf record \
     --event=instructions/freq=9999/ \
     --event=raw_syscalls:sys_enter \
     --event=raw_syscalls:sys_exit \
+    --event=sdt_tokio:task_finish \
     --event=sdt_tokio:task_poll_begin \
     --event=sdt_tokio:task_poll_end \
     --mmap-pages=512M \
