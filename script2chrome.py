@@ -11,9 +11,9 @@ VIRT_THREAD_OFFSET = 2**32
 
 
 class EventDescrType(Enum):
-    BEGIN = 1
-    END = 2
-    INSTANT = 3
+    BEGIN = "B"
+    END = "E"
+    INSTANT = "i"
 
 
 @dataclass
@@ -78,17 +78,11 @@ class Event:
             "name": str(self.header.descr),
             "cat": str(type(self.header.descr)),
             "stack": self.backtrace,
+            "ph": self.header.descr.ty.value,
         }
 
-        if self.header.descr.ty == EventDescrType.BEGIN:
-            out["ph"] = "B"
-        elif self.header.descr.ty == EventDescrType.END:
-            out["ph"] = "E"
-        elif self.header.descr.ty == EventDescrType.INSTANT:
-            out["ph"] = "i"
+        if self.header.descr.ty == EventDescrType.INSTANT:
             out["s"] = "t"
-        else:
-            raise Exception(f"Unknown event description type: {self.descr.ty}")
 
         return out
 
@@ -147,15 +141,15 @@ def parse_header(line: str) -> EventHeader:
     header_head, header_tail = line.split(":", maxsplit=1)
 
     # read fields from right to left because thread name may contain spaces
-    header_head, ts = header_head.rsplit(" ", maxsplit=1)
-    ts = float(ts)
+    header_head, ts_str = header_head.rsplit(" ", maxsplit=1)
+    ts = float(ts_str)
 
-    header_head, core = header_head.rsplit(" ", maxsplit=1)
-    assert core.startswith("[") and core.endswith("]")
-    core = int(core[1:-1])
+    header_head, core_str = header_head.rsplit(" ", maxsplit=1)
+    assert core_str.startswith("[") and core_str.endswith("]")
+    core = int(core_str[1:-1])
 
-    header_head, thread_id = header_head.rsplit(" ", maxsplit=1)
-    thread_id = int(thread_id)
+    header_head, thread_id_str = header_head.rsplit(" ", maxsplit=1)
+    thread_id = int(thread_id_str)
 
     thread_name = thread_name_prefix + header_head
 
@@ -171,12 +165,13 @@ def parse_header(line: str) -> EventHeader:
 
 
 def parse(lines: Iterable[str]) -> Generator[Event, None, None]:
+    lines_it = iter(lines)
     line = None
 
     while True:
         if line is None:
             try:
-                line = next(lines)
+                line = next(lines_it)
             except StopIteration:
                 return
 
@@ -189,7 +184,7 @@ def parse(lines: Iterable[str]) -> Generator[Event, None, None]:
         backtrace = []
         while True:
             try:
-                line = next(lines)
+                line = next(lines_it)
             except StopIteration:
                 break
 
