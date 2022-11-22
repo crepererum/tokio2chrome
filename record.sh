@@ -10,6 +10,7 @@ exec perf record \
     --event=raw_syscalls:sys_exit \
     --event=sdt_tokio:task_poll_begin \
     --event=sdt_tokio:task_poll_end \
+    --mmap-pages=512M \
     --sample-cpu \
     --stat \
     --timestamp \
