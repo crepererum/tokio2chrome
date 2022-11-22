@@ -11,8 +11,11 @@ perf buildid-cache --remove "$IOX_PATH"
 perf buildid-cache --add "$IOX_PATH"
 
 # register probes
-probes=( task_finish task_poll_begin task_poll_end )
+probes=( task_finish task_poll_begin task_poll_end task_blocking_begin task_blocking_end )
 for probe in "${probes[@]}"; do
-    perf probe --verbose --del="sdt_tokio:$probe"
+    set +e
+    perf probe --del="sdt_tokio:$probe"
+    set -e
+
     perf probe --verbose --add="sdt_tokio:$probe"
 done

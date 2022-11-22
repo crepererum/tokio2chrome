@@ -67,6 +67,16 @@ class EventDescrTokioTaskFinish:
 
 
 @dataclass
+class EventDescrTokioTaskBlockingBegin:
+    ty: EventDescrType = EventDescrType.BEGIN
+
+
+@dataclass
+class EventDescrTokioTaskBlockingEnd:
+    ty: EventDescrType = EventDescrType.END
+
+
+@dataclass
 class EventDescrProcessName:
     name: str
     ty: EventDescrType = EventDescrType.METADATA
@@ -100,6 +110,8 @@ class EventDescrOther:
 EventDescr = (
     EventDescrSysEnter
     | EventDescrSysExit
+    | EventDescrTokioTaskBlockingBegin
+    | EventDescrTokioTaskBlockingEnd
     | EventDescrTokioTaskStart
     | EventDescrTokioTaskFinish
     | EventDescrTokioTaskPollBegin
@@ -198,6 +210,10 @@ def parse_descr(s: str) -> EventDescr:
         return EventDescrTokioTaskFinish(
             task=extract_sdt_arg(s, 1),
         )
+    elif "sdt_tokio:task_blocking_begin" in s:
+        return EventDescrTokioTaskBlockingBegin()
+    elif "sdt_tokio:task_blocking_end" in s:
+        return EventDescrTokioTaskBlockingEnd()
     else:
         return EventDescrOther(
             content=s
@@ -307,6 +323,9 @@ def process_events(events: Iterable[Event]) -> Generator[Event, None, None]:
     # flags if we have set up process-level metadata
     process_metadata_done = False
 
+    # remembers stashed phys_thread_state entries (due to bocking tasks)
+    phys_thread_state_stash: dict[int, list[int]] = {}
+
     for evt in events_it:
         task = None
         tid = None
@@ -380,6 +399,27 @@ def process_events(events: Iterable[Event]) -> Generator[Event, None, None]:
                 del known_tasks[task]
             except KeyError:
                 continue
+        elif isinstance(evt.header.descr, EventDescrTokioTaskBlockingBegin):
+            tid = phys_thread_state.get(evt.header.thread_id)
+            if tid is not None:
+                task = known_tasks_rev[tid]
+                del phys_thread_state[evt.header.thread_id]
+            else:
+                print(f"No tokio task active, but starting blocking task: thread={evt.header.thread_id}")
+
+            if evt.header.thread_id not in phys_thread_state_stash:
+                phys_thread_state_stash[evt.header.thread_id] = []
+            phys_thread_state_stash[evt.header.thread_id].append(tid)
+        elif isinstance(evt.header.descr, EventDescrTokioTaskBlockingEnd):
+            try:
+                tid = phys_thread_state_stash[evt.header.thread_id].pop(-1)
+            except (KeyError, IndexError):
+                print(f"No stashed tokio task, but finished blocking task: thread={evt.header.thread_id}")
+                continue
+
+            phys_thread_state[evt.header.thread_id] = tid
+            if tid is not None:
+                task = known_tasks_rev[tid]
 
         if tid is None:
             try:

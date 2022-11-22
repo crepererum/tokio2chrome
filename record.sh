@@ -11,7 +11,9 @@ exec perf record \
     --event=sdt_tokio:task_finish \
     --event=sdt_tokio:task_poll_begin \
     --event=sdt_tokio:task_poll_end \
-    --mmap-pages=512M \
+    --event=sdt_tokio:task_blocking_begin \
+    --event=sdt_tokio:task_blocking_end \
+    --mmap-pages=256M \
     --sample-cpu \
     --stat \
     --timestamp \
