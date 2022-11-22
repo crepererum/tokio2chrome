@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import Enum
 import json
+import re
 from typing import cast, Generator, TypeAlias
 
 
@@ -13,11 +14,18 @@ VIRT_THREAD_OFFSET = 2**32
 # See https://github.com/python/typing/issues/182#issuecomment-1320974824
 JSON: TypeAlias = dict[str, "JSON"] | list["JSON"] | str | int | float | bool | None
 
+SNAKE_CASE_RE = re.compile(r'(?<!^)(?=[A-Z])')
+
+# See https://stackoverflow.com/a/1176023
+def camel2snake(s: str) -> str:
+    return SNAKE_CASE_RE.sub('_', s).lower()
+
 
 class EventDescrType(Enum):
     BEGIN = "B"
     END = "E"
     INSTANT = "i"
+    METADATA = "M"
 
 
 @dataclass
@@ -46,9 +54,34 @@ class EventDescrTokioTaskPollEnd:
 
 
 @dataclass
-class EventDescOther:
+class EventDescrProcessName:
+    name: str
+    ty: EventDescrType = EventDescrType.METADATA
+
+
+@dataclass
+class EventDescrProcessSortIndex:
+    sort_index: int
+    ty: EventDescrType = EventDescrType.METADATA
+
+
+@dataclass
+class EventDescrThreadName:
+    name: str
+    ty: EventDescrType = EventDescrType.METADATA
+
+
+@dataclass
+class EventDescrThreadSortIndex:
+    sort_index: int
+    ty: EventDescrType = EventDescrType.METADATA
+
+
+@dataclass
+class EventDescrOther:
     content: str
     ty: EventDescrType = EventDescrType.INSTANT
+
 
 
 EventDescr = (
@@ -56,7 +89,11 @@ EventDescr = (
     | EventDescrSysExit
     | EventDescrTokioTaskPollBegin
     | EventDescrTokioTaskPollEnd
-    | EventDescOther
+    | EventDescrProcessName
+    | EventDescrProcessSortIndex
+    | EventDescrThreadName
+    | EventDescrThreadSortIndex
+    | EventDescrOther
 )
 
 
@@ -74,15 +111,29 @@ class Event:
     header: EventHeader
     backtrace: list[str] | None
 
-    def to_chrome(self, tid: int) -> JSON:
+    def to_chrome(self) -> JSON:
+        name = camel2snake(
+            type(self.header.descr).__name__.removeprefix("EventDescr").removesuffix("Enter").removesuffix("Exit").removesuffix("Begin").removesuffix("End")
+        )
+
         out: dict[str, JSON] = {
             "pid": PID,
-            "tid": tid,
-            "ts": self.header.ts,
-            "name": str(self.header.descr),
-            "cat": str(type(self.header.descr)),
+            "tid": self.header.thread_id,
+            # ts is in micros
+            "ts": self.header.ts * 1_000_000,
+            "cat": name,
+            "name": name,
             "ph": self.header.descr.ty.value,
         }
+
+        args = {}
+        for k, v in asdict(self.header.descr).items():
+            if k == "ty":
+                continue
+            if isinstance(v, Enum):
+                v = v.value
+            args[k] = v
+        out["args"] = args
 
         if self.backtrace is not None:
             out["stack"] = cast(JSON, self.backtrace)
@@ -128,7 +179,7 @@ def parse_descr(s: str) -> EventDescr:
             is_ready=bool(extract_sdt_arg(s, 2)),
         )
     else:
-        return EventDescOther(
+        return EventDescrOther(
             content=s
         )
 
@@ -216,9 +267,8 @@ def metadata_event(name: str, tid: int, args: JSON) -> JSON:
     }
 
 
-def main() -> None:
-    # accumulates all events for JSON output
-    events = []
+def process_events(events: Iterable[Event]) -> Generator[Event, None, None]:
+    events_it = iter(events)
 
     # ID counter for virtual threads (one for each tokio task)
     virt_thread_counter = 0
@@ -237,91 +287,148 @@ def main() -> None:
     # flags if we have set up process-level metadata
     process_metadata_done = False
 
-    with open("perf.txt") as f_in:
-        for evt in parse(f_in):
-            if isinstance(evt.header.descr, EventDescrTokioTaskPollBegin):
-                task = evt.header.descr.task
+    for evt in events_it:
+        if isinstance(evt.header.descr, EventDescrTokioTaskPollBegin):
+            task = evt.header.descr.task
 
-                if task not in known_tasks:
-                    known_tasks[task] = VIRT_THREAD_OFFSET - virt_thread_counter
-                    virt_thread_counter += 1
+            if evt.header.thread_id in phys_thread_state:
+                tid = phys_thread_state[evt.header.thread_id]
+                old_task = known_tasks_rev[tid]
+                print(f"already have a task running on this thread: thread={evt.header.thread_id} new_task={task} old_task={old_task}")
+                yield Event(
+                    header=EventHeader(
+                        thread_name=thread_names[tid],
+                        thread_id=tid,
+                        core=evt.header.core,
+                        ts=evt.header.ts,
+                        descr=EventDescrTokioTaskPollEnd(
+                            task=old_task,
+                            is_ready=False,
+                        ),
+                    ),
+                    backtrace=None,
+                )
 
-                phys_thread_state[evt.header.thread_id] = known_tasks[task]
-                known_tasks_rev[known_tasks[task]] = task
-            elif isinstance(evt.header.descr, EventDescrTokioTaskPollEnd):
-                task = evt.header.descr.task
-                is_ready = evt.header.descr.is_ready
+            if task not in known_tasks:
+                known_tasks[task] = VIRT_THREAD_OFFSET - virt_thread_counter
+                virt_thread_counter += 1
 
-                try:
-                    del phys_thread_state[evt.header.thread_id]
-                except KeyError:
-                    print(f"tokio poll end w/o begin: thread={evt.header.thread_id} task={task}")
-
-                if is_ready:
-                    try:
-                        del known_tasks[task]
-                    except KeyError:
-                        print(f"unknown tokio task: task={task}")
+            phys_thread_state[evt.header.thread_id] = known_tasks[task]
+            known_tasks_rev[known_tasks[task]] = task
+        elif isinstance(evt.header.descr, EventDescrTokioTaskPollEnd):
+            task = evt.header.descr.task
+            is_ready = evt.header.descr.is_ready
 
             try:
-                tid = phys_thread_state[evt.header.thread_id]
-                task = known_tasks_rev[tid]
-                thread_name = f"tokio task: {task}"
+                tid = known_tasks[task]
             except KeyError:
-                tid = evt.header.thread_id
-                thread_name = f"thread: {evt.header.thread_id}: {evt.header.thread_name}"
+                print(f"tokio poll end w/o any begin: task={task}")
+                continue
 
-            # emit "thread name" metadata events
-            if tid not in thread_names:
-                thread_names[tid] = thread_name
+            if phys_thread_state.get(evt.header.thread_id) != tid:
+                print(f"tokio poll end w/o begin on this thread: thread={evt.header.thread_id} task={task}")
+                continue
 
-                if not process_metadata_done:
-                    events += [
-                        metadata_event(
-                            "process_name",
-                            tid,
-                            {
-                                "name": "tokio2chrome",
-                            },
+            del phys_thread_state[evt.header.thread_id]
+
+            if is_ready:
+                try:
+                    del known_tasks[task]
+                except KeyError:
+                    print(f"unknown tokio task: task={task}")
+                    continue
+
+        try:
+            tid = phys_thread_state[evt.header.thread_id]
+            task = known_tasks_rev[tid]
+            thread_name = f"tokio task: {task}"
+        except KeyError:
+            tid = evt.header.thread_id
+            thread_name = f"thread: {evt.header.thread_id}: {evt.header.thread_name}"
+
+        # emit "thread name" metadata events
+        if tid not in thread_names:
+            thread_names[tid] = thread_name
+
+            if not process_metadata_done:
+                yield Event(
+                    header=EventHeader(
+                        thread_name=thread_name,
+                        thread_id=tid,
+                        core=evt.header.core,
+                        ts=0,
+                        descr=EventDescrProcessName(
+                            name="tokio2chrome",
                         ),
-                        metadata_event(
-                            "process_sort_index",
-                            tid,
-                            {
-                                "sort_index": 0,
-                            },
+                    ),
+                    backtrace=None,
+                )
+                yield Event(
+                    header=EventHeader(
+                        thread_name=thread_name,
+                        thread_id=tid,
+                        core=evt.header.core,
+                        ts=0,
+                        descr=EventDescrProcessSortIndex(
+                            sort_index=0,
                         ),
-                    ]
-                    process_metadata_done = True
-
-                events += [
-                    metadata_event(
-                        "thread_name",
-                        tid,
-                        {
-                            "name": thread_name,
-                        },
                     ),
-                    metadata_event(
-                        "thread_sort_index",
-                        tid,
-                        {
-                            "sort_index": tid,
-                        },
+                    backtrace=None,
+                )
+                process_metadata_done = True
+
+            yield Event(
+                header=EventHeader(
+                    thread_name=thread_name,
+                    thread_id=tid,
+                    core=evt.header.core,
+                    ts=0,
+                    descr=EventDescrThreadName(
+                        name=thread_name,
                     ),
-                ]
+                ),
+                backtrace=None,
+            )
+            yield Event(
+                header=EventHeader(
+                    thread_name=thread_name,
+                    thread_id=tid,
+                    core=evt.header.core,
+                    ts=0,
+                    descr=EventDescrThreadSortIndex(
+                        sort_index=tid,
+                    ),
+                ),
+                backtrace=None,
+            )
 
-            # emit actual event
-            events.append(evt.to_chrome(tid))
-
+        # emit actual event
+        yield Event(
+            header=EventHeader(
+                thread_name=thread_name,
+                thread_id=tid,
+                core=evt.header.core,
+                ts=evt.header.ts,
+                descr=evt.header.descr,
+            ),
+            backtrace=evt.backtrace,
+        )
 
     for task in sorted(known_tasks):
         print(f"task never ended: task={task}")
 
 
+def main() -> None:
+    # accumulates all events for JSON output
+    events = []
+
+    with open("perf.txt") as f_in:
+        for evt in process_events(parse(f_in)):
+            events.append(evt.to_chrome())
+
     out = {
         "traceEvents": events,
-        "displayTimeUnit": "s",
+        "displayTimeUnit": "ms",
     }
     with open("perf.json", "w") as f_out:
         json.dump(out, f_out)
