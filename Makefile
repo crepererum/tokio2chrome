@@ -1,4 +1,5 @@
 check:
-	mypy script2chrome.py
+	mypy *.py
+	shellcheck *.sh
 
 .PHONY: check
