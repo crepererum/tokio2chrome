@@ -1,5 +1,8 @@
-check:
+fmt:
+	black *.py
+
+lint:
 	mypy *.py
 	shellcheck *.sh
 
-.PHONY: check
+.PHONY: fmt lint

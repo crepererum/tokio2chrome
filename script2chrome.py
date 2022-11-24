@@ -16,11 +16,11 @@ VIRT_THREAD_OFFSET = 2**32
 # See https://github.com/python/typing/issues/182#issuecomment-1320974824
 JSON: TypeAlias = dict[str, "JSON"] | list["JSON"] | str | int | float | bool | None
 
-SNAKE_CASE_RE = re.compile(r'(?<!^)(?=[A-Z])')
+SNAKE_CASE_RE = re.compile(r"(?<!^)(?=[A-Z])")
 
 # See https://stackoverflow.com/a/1176023
 def camel2snake(s: str) -> str:
-    return SNAKE_CASE_RE.sub('_', s).lower()
+    return SNAKE_CASE_RE.sub("_", s).lower()
 
 
 class EventDescrType(Enum):
@@ -131,7 +131,6 @@ class EventDescrOther:
     ty: EventDescrType = EventDescrType.INSTANT
 
 
-
 EventDescr = (
     EventDescrSysEnter
     | EventDescrSysExit
@@ -170,7 +169,14 @@ class Event:
     @property
     def category(self) -> str:
         return camel2snake(
-            type(self.header.descr).__name__.removeprefix("EventDescr").removesuffix("Enter").removesuffix("Exit").removesuffix("Begin").removesuffix("End").removesuffix("Start").removesuffix("Finish")
+            type(self.header.descr)
+            .__name__.removeprefix("EventDescr")
+            .removesuffix("Enter")
+            .removesuffix("Exit")
+            .removesuffix("Begin")
+            .removesuffix("End")
+            .removesuffix("Start")
+            .removesuffix("Finish")
         )
 
     @property
@@ -257,17 +263,11 @@ def parse_descr(s: str) -> EventDescr:
     elif "sdt_tokio:task_blocking_end" in s:
         return EventDescrTokioTaskBlockingEnd()
     elif "cycles/" in s:
-        return EventDescrCounter(
-            content=s
-        )
+        return EventDescrCounter(content=s)
     elif "instructions/" in s:
-        return EventDescrCounter(
-            content=s
-        )
+        return EventDescrCounter(content=s)
     else:
-        return EventDescrOther(
-            content=s
-        )
+        return EventDescrOther(content=s)
 
 
 def parse_header(line: str) -> EventHeader:
@@ -371,7 +371,9 @@ def recover_virtual_threads(events: Iterable[Event]) -> Generator[Event, None, N
             if evt.header.thread_id in phys_thread_state:
                 old_tid = phys_thread_state[evt.header.thread_id]
                 old_task = known_tasks_rev[old_tid]
-                print(f"already have a task running on this thread: thread={evt.header.thread_id} new_task={task} old_task={old_task}")
+                print(
+                    f"already have a task running on this thread: thread={evt.header.thread_id} new_task={task} old_task={old_task}"
+                )
                 yield Event(
                     header=EventHeader(
                         thread_name=thread_names[old_tid],
@@ -406,7 +408,9 @@ def recover_virtual_threads(events: Iterable[Event]) -> Generator[Event, None, N
                 continue
 
             if phys_thread_state.get(evt.header.thread_id) != tid:
-                print(f"tokio poll end w/o begin on this thread: thread={evt.header.thread_id} task={task}")
+                print(
+                    f"tokio poll end w/o begin on this thread: thread={evt.header.thread_id} task={task}"
+                )
                 continue
 
             del phys_thread_state[evt.header.thread_id]
@@ -439,7 +443,9 @@ def recover_virtual_threads(events: Iterable[Event]) -> Generator[Event, None, N
                 task = known_tasks_rev[tid]
                 del phys_thread_state[evt.header.thread_id]
             else:
-                print(f"No tokio task active, but starting blocking task: thread={evt.header.thread_id}")
+                print(
+                    f"No tokio task active, but starting blocking task: thread={evt.header.thread_id}"
+                )
 
             if evt.header.thread_id not in phys_thread_state_stash:
                 phys_thread_state_stash[evt.header.thread_id] = []
@@ -448,7 +454,9 @@ def recover_virtual_threads(events: Iterable[Event]) -> Generator[Event, None, N
             try:
                 tid = phys_thread_state_stash[evt.header.thread_id].pop(-1)
             except (KeyError, IndexError):
-                print(f"No stashed tokio task, but finished blocking task: thread={evt.header.thread_id}")
+                print(
+                    f"No stashed tokio task, but finished blocking task: thread={evt.header.thread_id}"
+                )
                 continue
 
             if tid is not None:
@@ -618,20 +626,28 @@ def fix_thread_start_syscalls(events: Iterable[Event]) -> Generator[Event, None,
 
     for evt in events:
         # threads may start with execve (NR=59) or clone3 (NR=435)
-        if (evt.header.thread_id not in active_threads) and isinstance(evt.header.descr, EventDescrSysExit) and (evt.header.descr.nr in (59, 435)):
+        if (
+            (evt.header.thread_id not in active_threads)
+            and isinstance(evt.header.descr, EventDescrSysExit)
+            and (evt.header.descr.nr in (59, 435))
+        ):
             evt = Event(
                 header=EventHeader(
                     thread_name=evt.header.thread_name,
                     thread_id=evt.header.thread_id,
                     core=evt.header.core,
                     ts=evt.header.ts,
-                    descr=EventDescrOther(content=f"thread enter (NR={evt.header.descr.nr})"),
+                    descr=EventDescrOther(
+                        content=f"thread enter (NR={evt.header.descr.nr})"
+                    ),
                 ),
                 backtrace=evt.backtrace,
             )
 
         # ignore metadata and counter events because they may appear while the syscall is still running
-        if (evt.header.descr.ty != EventDescrType.METADATA) and (not isinstance(evt.header.descr, EventDescrCounter)):
+        if (evt.header.descr.ty != EventDescrType.METADATA) and (
+            not isinstance(evt.header.descr, EventDescrCounter)
+        ):
             active_threads.add(evt.header.thread_id)
 
         yield evt
@@ -704,7 +720,9 @@ class Block:
         # fix BEGIN/END events
         if sub2:
             begin = sub2[0]
-            if isinstance(begin, Event) and (begin.header.descr.ty == EventDescrType.BEGIN):
+            if isinstance(begin, Event) and (
+                begin.header.descr.ty == EventDescrType.BEGIN
+            ):
                 assert begin.backtrace is not None
                 if base != begin.backtrace:
                     head: list[Event | Block] = [
@@ -747,7 +765,6 @@ class Block:
                     ]
                     sub2 = sub2[:-1] + tail
 
-
         this = Block(
             parent=self.parent,
             sub=sub2,
@@ -780,7 +797,12 @@ def fix_stack_blocks(events: Iterable[Event]) -> Generator[Event, None, None]:
         elif evt.header.descr.ty == EventDescrType.END:
             parent = current_block.parent
 
-            if (parent is None) or (len(current_block.sub) < 1) or (not isinstance(current_block.sub[0], Event)) or (current_block.sub[0].name != evt.name):
+            if (
+                (parent is None)
+                or (len(current_block.sub) < 1)
+                or (not isinstance(current_block.sub[0], Event))
+                or (current_block.sub[0].name != evt.name)
+            ):
                 print(f"end event w/o begin: thread={evt.header.thread_id} evt={evt}")
                 evt = Event(
                     header=EventHeader(
@@ -788,7 +810,9 @@ def fix_stack_blocks(events: Iterable[Event]) -> Generator[Event, None, None]:
                         thread_id=evt.header.thread_id,
                         core=evt.header.core,
                         ts=evt.header.ts,
-                        descr=EventDescrOther(content=f"broken END event: {evt.header.descr}"),
+                        descr=EventDescrOther(
+                            content=f"broken END event: {evt.header.descr}"
+                        ),
                     ),
                     backtrace=evt.backtrace,
                 )
@@ -845,7 +869,11 @@ def create_stack_frame_ranges(events: Iterable[Event]) -> Generator[Event, None,
                     core=state.core,
                     ts=state.ts,
                     descr=EventDescrStackExit(
-                        name=format_stack_frame(len(state.backtrace) - i, evt.header.thread_id, state.backtrace[i]),
+                        name=format_stack_frame(
+                            len(state.backtrace) - i,
+                            evt.header.thread_id,
+                            state.backtrace[i],
+                        ),
                     ),
                 ),
                 backtrace=state.backtrace[i:],
@@ -858,12 +886,15 @@ def create_stack_frame_ranges(events: Iterable[Event]) -> Generator[Event, None,
                     core=evt.header.core,
                     ts=evt.header.ts,
                     descr=EventDescrStackEnter(
-                        name=format_stack_frame(len(evt.backtrace) - i, evt.header.thread_id, evt.backtrace[i]),
+                        name=format_stack_frame(
+                            len(evt.backtrace) - i,
+                            evt.header.thread_id,
+                            evt.backtrace[i],
+                        ),
                     ),
                 ),
                 backtrace=evt.backtrace[i:],
             )
-
 
         yield evt
 
@@ -885,7 +916,9 @@ def create_stack_frame_ranges(events: Iterable[Event]) -> Generator[Event, None,
                     core=state.core,
                     ts=state.ts,
                     descr=EventDescrStackExit(
-                        name=format_stack_frame(len(state.backtrace) - i, tid, state.backtrace[i]),
+                        name=format_stack_frame(
+                            len(state.backtrace) - i, tid, state.backtrace[i]
+                        ),
                     ),
                 ),
                 backtrace=state.backtrace[i:],
