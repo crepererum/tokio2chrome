@@ -610,6 +610,7 @@ def check_timestamps(events: Iterable[Event]) -> Generator[Event, None, None]:
                 thread_id=evt.header.thread_id,
                 thread_name=evt.header.thread_name,
                 core=evt.header.core,
+                # Speedscope is a bit weird and may mess up stacks if we have identical timestamps, so shift them a bit
                 ts=evt.header.ts + seen / 1_000_000_000,
                 descr=evt.header.descr,
             ),
