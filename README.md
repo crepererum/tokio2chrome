@@ -75,8 +75,25 @@ $ ./record.sh target/quick-release/influxdb_iox all-in-one ...
 ```
 
 ### Analyze
-TODO
+First convert the binary output (`perf.data`) to text dump (`perf.txt`):
 
+```console
+$ perf script
+```
+
+Then convert it to a [JSON]:
+
+```console
+$ ./script2chrome.py
+```
+
+You can load the resulting `perf.json` into [Google Chrome] / [Chromium] or [Speedscope].
+
+You can also use [Catapult] to convert `perf.json` into an HTML:
+
+```console
+$ path/to/catapult/tracing/bin/trace2html perf.json --output=perf.html --config full
+```
 
 ## License
 
@@ -92,9 +109,11 @@ Unless you explicitly state otherwise, any contribution you intentionally submit
 in the Apache-2.0 license, shall be dual-licensed as above, without any additional terms or conditions.
 
 
+[Catapult]: https://github.com/catapult-project/catapult
 [Chromium]: https://www.chromium.org/Home/
 [Google Chrome]: https://www.google.com/chrome/index.html
 [InfluxDB IOx]: https://github.com/influxdata/influxdb_iox/
+[JSON]: https://www.json.org/
 [perf]: https://perf.wiki.kernel.org/index.php/Main_Page
 [Speedscope]: https://www.speedscope.app/
 [SystemTap SDT]: https://sourceware.org/systemtap/wiki/AddingUserSpaceProbingToApps
