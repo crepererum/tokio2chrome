@@ -95,6 +95,7 @@ You can also use [Catapult] to convert `perf.json` into an HTML:
 $ path/to/catapult/tracing/bin/trace2html perf.json --output=perf.html --config full
 ```
 
+
 ## License
 
 Licensed under either of these:
