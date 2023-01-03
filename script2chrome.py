@@ -14,6 +14,15 @@ from weakref import ref, ReferenceType
 PID = 1
 VIRT_THREAD_OFFSET = 2**32
 
+CNAMES = {
+    "tokio_task": "thread_state_sleeping",
+    "tokio_task_poll": "thread_state_runnable",
+    "tokio_task_blocking": "thread_state_iowait",
+    "stack": "thread_state_running",
+    "sys": "thread_state_iowait",
+    "counter": "generic_work",
+}
+
 
 # See https://github.com/python/typing/issues/182#issuecomment-1320974824
 JSON: TypeAlias = dict[str, "JSON"] | list["JSON"] | str | int | float | bool | None
@@ -188,6 +197,13 @@ class Event:
         else:
             return self.category
 
+    @property
+    def cname(self) -> str:
+        try:
+            return CNAMES[self.category]
+        except KeyError:
+            return "thread_state_unknown"
+
     def to_chrome(self) -> JSON:
         name = self.name
         category = self.category
@@ -198,6 +214,7 @@ class Event:
             # ts is in micros
             "ts": self.header.ts * 1_000_000,
             "cat": category,
+            "cname": self.cname,
             "name": name,
             "ph": self.header.descr.ty.value,
         }
