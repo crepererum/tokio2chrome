@@ -68,6 +68,8 @@ You won't have the permissions to just run `perf record`, so we need to weaken t
 $ sudo ./setup_system.sh
 ```
 
+(sometimes this will fail on the first run, just run it a second time)
+
 ### Record
 
 ```console
