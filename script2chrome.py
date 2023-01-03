@@ -394,7 +394,7 @@ def recover_virtual_threads(events: Iterable[Event]) -> Generator[Event, None, N
 
             tid = known_tasks.get(task)
             if tid is None:
-                tid = VIRT_THREAD_OFFSET - virt_thread_counter
+                tid = VIRT_THREAD_OFFSET + virt_thread_counter
                 known_tasks[task] = tid
                 known_tasks_rev[tid] = task
                 virt_thread_counter += 1
