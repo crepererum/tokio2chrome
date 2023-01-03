@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+
+import argparse
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from enum import Enum
@@ -946,11 +948,26 @@ def check_begin_ends(events: Iterable[Event]) -> Generator[Event, None, None]:
         yield evt
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="""
+Convert `perf script` output to Chrome/Chromium-compatible JSON, detecting tokio tasks along the way.
+        """.strip(),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("-i", "--input", help="Input file", default="perf.txt")
+    parser.add_argument("-o", "--output", help="Output file", default="perf.json")
+
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
+
     # accumulates all events for JSON output
     events: list[JSON] = []
 
-    with open("perf.txt") as f_in:
+    with open(args.input) as f_in:
         events_it = parse_perf_script_output(f_in)
         events_it = recover_virtual_threads(events_it)
         events_it = add_metadata_events(events_it)
@@ -966,7 +983,7 @@ def main() -> None:
         "traceEvents": events,
         "displayTimeUnit": "ms",
     }
-    with open("perf.json", "w") as f_out:
+    with open(args.output, "w") as f_out:
         json.dump(out, f_out)
 
 
