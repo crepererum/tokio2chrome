@@ -286,14 +286,15 @@ def parse_header(line: str) -> EventHeader:
     header_head, header_tail = line.split(":", maxsplit=1)
 
     # read fields from right to left because thread name may contain spaces
-    header_head, ts_str = header_head.rsplit(" ", maxsplit=1)
+    # Note: Space separators in the header are actually `[ ]+`, not ` `, so do NOT set the `sep` argument for `rsplit`.
+    header_head, ts_str = header_head.rsplit(maxsplit=1)
     ts = float(ts_str)
 
-    header_head, core_str = header_head.rsplit(" ", maxsplit=1)
-    assert core_str.startswith("[") and core_str.endswith("]")
+    header_head, core_str = header_head.rsplit(maxsplit=1)
+    assert core_str.startswith("[") and core_str.endswith("]"), core_str
     core = int(core_str[1:-1])
 
-    header_head, thread_id_str = header_head.rsplit(" ", maxsplit=1)
+    header_head, thread_id_str = header_head.rsplit(maxsplit=1)
     thread_id = int(thread_id_str)
 
     thread_name = thread_name_prefix + header_head
