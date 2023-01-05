@@ -17,6 +17,11 @@ symbols nor the mangled ones.
 
 So have modified [tokio] to include [SystemTap SDT] probes and provide some tooling to process these.
 
+Here are two example outputs:
+
+![Output Chrome](img/chrome.png)
+
+![Output Catapult](img/catapult.png)
 
 ## Usage
 
