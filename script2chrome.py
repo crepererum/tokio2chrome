@@ -679,7 +679,7 @@ def is_unknown_frame(s: str) -> bool:
 
 
 def is_unknown_trace(backtrace: list[str]) -> bool:
-    return (backtrace is not None) and is_unknown_frame(backtrace[-1])
+    return (len(backtrace) > 0) and is_unknown_frame(backtrace[-1])
 
 
 def common_base(bt1: list[str], bt2: list[str]) -> list[str]:
@@ -706,7 +706,7 @@ class Block:
             backtrace = None
             if isinstance(x, Event):
                 # skip events for now that we cannot process
-                if (x.backtrace is not None) and not is_unknown_trace(x.backtrace):
+                if (x.backtrace is not None) and (len(x.backtrace) > 0) and not is_unknown_trace(x.backtrace):
                     backtrace = x.backtrace
             else:
                 assert isinstance(x, Block)
