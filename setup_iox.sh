@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -eux -o pipefail
+set -eu -o pipefail
 
 readonly IOX_PATH="target/quick-release/influxdb_iox"
 
@@ -11,11 +11,19 @@ perf buildid-cache --remove "$IOX_PATH"
 perf buildid-cache --add "$IOX_PATH"
 
 # register probes
-probes=( task_finish task_poll_begin task_poll_end task_blocking_begin task_blocking_end )
+probes=(
+    task_blocking_begin
+    task_blocking_end
+    task_finish
+    task_poll_begin
+    task_poll_end
+    task_schedule_start
+    task_start
+)
 for probe in "${probes[@]}"; do
     set +e
     perf probe --del="sdt_tokio:$probe"
     set -e
 
-    perf probe --verbose --add="sdt_tokio:$probe"
+    perf probe --add="sdt_tokio:$probe"
 done
