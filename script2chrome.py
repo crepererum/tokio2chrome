@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from enum import Enum
 import json
 import re
@@ -220,7 +220,7 @@ class Event:
         }
 
         args = {}
-        for k, v in asdict(self.header.descr).items():
+        for k, v in self.header.descr.__dict__.items():
             if k == "ty":
                 continue
             if isinstance(v, Enum):
