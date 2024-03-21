@@ -85,7 +85,7 @@ $ ./record.sh target/quick-release/influxdb_iox all-in-one ...
 First convert the binary output (`perf.data`) to text dump (`perf.txt`):
 
 ```console
-$ perf script
+$ perf script > perf.txt
 ```
 
 Then convert it to a [JSON]:
