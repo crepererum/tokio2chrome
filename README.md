@@ -102,6 +102,15 @@ You can also use [Catapult] to convert `perf.json` into an HTML:
 $ path/to/catapult/tracing/bin/trace2html perf.json --output=perf.html --config full
 ```
 
+### Online Analyzer
+Analyzing data offline can be super slow due to the Python script but also because loading large profiles into [Chromium] is not a good UX. A totally different approach is [bpftrace]. For that, just fire up IOx, figure out its PID and then run
+
+```console
+$ sudo bpftrace ./online_analyzer.bt <PID>
+```
+
+That should print some statistics without the need to gather large quantities of data.
+
 
 ## License
 
@@ -117,6 +126,7 @@ Unless you explicitly state otherwise, any contribution you intentionally submit
 in the Apache-2.0 license, shall be dual-licensed as above, without any additional terms or conditions.
 
 
+[bpftrace]: https://github.com/bpftrace/bpftrace/
 [Catapult]: https://github.com/catapult-project/catapult
 [Chromium]: https://www.chromium.org/Home/
 [Google Chrome]: https://www.google.com/chrome/index.html
