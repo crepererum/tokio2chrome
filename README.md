@@ -8,6 +8,66 @@ Linux [perf] is a very powerful tool to understand the performance of an app. Wh
 tasks are completely opaque to it and hence you'll have a hard time reading the `perf script` output. The tooling in
 this repo wants to help with this.
 
+When thinking about [tokio]s scheduling model, I think we should just talk about [green threads] because that's technically what async tasks are. So [tokio] is _just_ a user land scheduler for [green threads]. With the probes (see [Technical Background](#technical-background)) the state diagram of a task looks like this:
+
+```mermaid
+flowchart LR
+    Start((Start))
+    End((End))
+
+    Scheduled["`
+**Scheduled**
+
+Wait for tokio scheduler.
+`"]
+
+    Polling["`
+**Polling**
+
+NO long-blocking OPs!
+`"]
+
+    Blocking["`
+**Blocking**
+
+Tokio knows that
+thread may block.
+
+Syscalls are OK.
+`"]
+
+    Sleep["`
+**Sleep**
+
+Wait for other async
+task/waker.
+`"]
+
+    Syscall["`
+**Syscall**
+
+Blocking sycall.
+`"]
+
+    %% Task creation
+    Start -- "`task_start`" --> Sleep
+
+    %% How to get out of sleep
+    Sleep -- "`task_schedule_start`" --> Scheduled
+    Sleep -- "`task_finish`" --> End
+
+    %% In-out of Pooling
+    Scheduled -- "`task_poll_begin`" --> Polling
+    Polling -- "`task_poll_end`" --> Sleep
+
+    %% Blocking
+    Polling -- "`task_blocking_begin`" --> Blocking
+    Blocking -- "`task_blocking_end`" --> Polling
+
+    %% Syscalls
+    Polling -- "`sys_enter`" --> Syscall
+    Syscall -- "`sys_exit`" --> Polling
+```
 
 ## Technical Background
 Ideally this would work without modifying the source code and just by using dynamic tracepoints. Seems
@@ -130,6 +190,7 @@ in the Apache-2.0 license, shall be dual-licensed as above, without any addition
 [Catapult]: https://github.com/catapult-project/catapult
 [Chromium]: https://www.chromium.org/Home/
 [Google Chrome]: https://www.google.com/chrome/index.html
+[green threads]: https://en.wikipedia.org/wiki/Green_thread
 [InfluxDB IOx]: https://github.com/influxdata/influxdb_iox/
 [JSON]: https://www.json.org/
 [perf]: https://perf.wiki.kernel.org/index.php/Main_Page
