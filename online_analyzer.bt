@@ -17,6 +17,11 @@ usdt:/home/mneumann/src/influxdb_iox/target/quick-release/influxdb_iox:tokio:tas
 {
     $now = nsecs();
 
+    if (@sleep_start[arg0]) {
+        @sleep_duration_usecs = hist(($now - @sleep_start[arg0]) / 1000);
+        delete(@sleep_start[arg0]);
+    }
+
     @schedule_start[arg0] = $now;
 }
 
@@ -60,10 +65,45 @@ usdt:/home/mneumann/src/influxdb_iox/target/quick-release/influxdb_iox:tokio:tas
     $now = nsecs();
 
     @poll_duration_usecs = hist(($now - @poll_start[arg0] - @poll_blocking_duration[arg0]) / 1000);
+    @sleep_start[arg0] = $now;
 
     delete(@poll_start[arg0]);
     delete(@poll_blocking_duration[arg0]);
     delete(@thread_assignment[tid]);
+}
+
+tracepoint:raw_syscalls:sys_enter
+/(pid == $1) && (args.id != 219) && @thread_assignment[tid] && (!@blocking_start[tid])/
+{
+    $now = nsecs();
+
+    @syscall_start[tid] = $now;
+
+    // Futex WAIT detection:
+    // - Syscall is 202 ( https://github.com/torvalds/linux/blob/v4.17/arch/x86/entry/syscalls/syscall_64.tbl )
+    // - OP (without modifiers) is FUTEX_WAIT
+    @syscall_is_futex_wait[tid] = (args.id == 202) && (((args.args[1]) & ((uint64)127)) == 0);
+}
+
+tracepoint:raw_syscalls:sys_exit
+/pid == $1 && @syscall_start[tid] && args.id != 219/
+{
+    $now = nsecs();
+
+    $d = ($now - @syscall_start[tid]);
+
+    if (@syscall_is_futex_wait[tid]) {
+        @syscall_futex_wait_during_poll_duration_usecs = hist($d / 1000);
+
+        if (($d / 1000) > 100) {
+            @lock_contention[ustack(5)] = count();
+        }
+    } else {
+        @syscall_other_during_poll_duration_usecs = hist($d / 1000);
+    }
+
+    delete(@syscall_start[tid]);
+    delete(@syscall_is_futex_wait[tid]);
 }
 
 END
@@ -77,5 +117,8 @@ END
     clear(@poll_start);
     clear(@poll_blocking_duration);
     clear(@blocking_start);
+    clear(@sleep_start);
+    clear(@syscall_start);
+    clear(@syscall_is_futex_wait);
     clear(@thread_assignment);
 }
