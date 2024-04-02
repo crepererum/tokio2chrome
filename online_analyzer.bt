@@ -12,7 +12,7 @@ BEGIN
     printf("press CTRL-C to stop\n");
 }
 
-usdt:/home/mneumann/src/influxdb_iox/target/quick-release/influxdb_iox:tokio:task_schedule_start
+usdt:*:tokio:task_schedule_start
 /pid == $1/
 {
     $now = nsecs();
@@ -25,7 +25,7 @@ usdt:/home/mneumann/src/influxdb_iox/target/quick-release/influxdb_iox:tokio:tas
     @schedule_start[arg0] = $now;
 }
 
-usdt:/home/mneumann/src/influxdb_iox/target/quick-release/influxdb_iox:tokio:task_poll_begin
+usdt:*:tokio:task_poll_begin
 /pid == $1/
 {
     $now = nsecs();
@@ -40,7 +40,7 @@ usdt:/home/mneumann/src/influxdb_iox/target/quick-release/influxdb_iox:tokio:tas
     @thread_assignment[tid] = arg0;
 }
 
-usdt:/home/mneumann/src/influxdb_iox/target/quick-release/influxdb_iox:tokio:task_blocking_begin
+usdt:*:tokio:task_blocking_begin
 /pid == $1 && @thread_assignment[tid]/
 {
     $now = nsecs();
@@ -48,7 +48,7 @@ usdt:/home/mneumann/src/influxdb_iox/target/quick-release/influxdb_iox:tokio:tas
     @blocking_start[tid] = $now;
 }
 
-usdt:/home/mneumann/src/influxdb_iox/target/quick-release/influxdb_iox:tokio:task_blocking_end
+usdt:*:tokio:task_blocking_end
 /pid == $1 && @blocking_start[tid]/
 {
     $now = nsecs();
@@ -59,7 +59,7 @@ usdt:/home/mneumann/src/influxdb_iox/target/quick-release/influxdb_iox:tokio:tas
     delete(@blocking_start[tid]);
 }
 
-usdt:/home/mneumann/src/influxdb_iox/target/quick-release/influxdb_iox:tokio:task_poll_end
+usdt:*:tokio:task_poll_end
 /pid == $1 && @poll_start[arg0]/
 {
     $now = nsecs();
