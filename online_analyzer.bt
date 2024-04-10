@@ -73,7 +73,7 @@ usdt:*:tokio:task_poll_end
 }
 
 tracepoint:raw_syscalls:sys_enter
-/(pid == $1) && (args.id != 219) && @thread_assignment[tid] && (!@blocking_start[tid])/
+/(pid == $1) && uptr(args.id != 219) && @thread_assignment[tid] && (!@blocking_start[tid])/
 {
     $now = nsecs();
 
